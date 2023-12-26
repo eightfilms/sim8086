@@ -4,6 +4,7 @@ package main
 
 import "core:fmt"
 import "core:log"
+import "core:path/filepath"
 import "core:mem/virtual"
 import "core:strings"
 import "core:testing"
@@ -109,34 +110,15 @@ op_str :: proc(opcode: Opcode) -> (string, Error) {
     return err_msg, .UnsupportedOpcode
 }
 
-sim :: proc() -> Error {
-  context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
-
-  buf := make([]byte, 8)
-
+sim :: proc(bytes: []byte) -> (out: string, err: Error) {
+  using strings
   reg_str_w0 := RegisterStringW0;
   reg_str_w1 := RegisterStringW1;
 
-  // fd, ferr := os.open("./listing_0038_many_register_mov");
-  fd, ferr := os.open("./listing_0039_more_movs");
-  if ferr != 0 {
-      return .None
-  }
+  b := builder_make()
 
-  bytes, ok := os.read_entire_file(fd)
-
-  if !ok {
-      return .None
-  }
-
-  log.debugf("Read %d bytes.", len(bytes))
-
-  out := make([dynamic]string)
-  b := strings.Builder{}
-  defer strings.builder_destroy(&b)
-
-  ea := strings.Builder{}
-  defer strings.builder_destroy(&ea)
+  ea := Builder{}
+  defer builder_destroy(&ea)
 
   for i := 0; i < len(bytes); i += 2 {
     first := bytes[i]
@@ -152,17 +134,13 @@ sim :: proc() -> Error {
     regs := second & 0b111111
 
     op := op_str(opcode) or_return
-    fmt.printf("[%i] d=%b, op=%s (%b)\n", i / 2, d, op, u8(opcode))
-    res := make([dynamic]string)
-    strings.write_string(&b, op)
-    strings.write_string(&b, " ")
-
+    log.debugf("[%i] d=%b, op=%s (%b)", i / 2, d, op, u8(opcode))
     reg := second & REG_MASK >> 3 
     src_operand := fmt.tprint(reg)
     dst_operand := fmt.tprint(reg)
     switch opcode {
         case .ImmToRegOrMem:
-            return .None
+            return "", .None
         case .RegOrMemToFromReg:
             r_m := second & R_M_MASK 
 
@@ -180,33 +158,33 @@ sim :: proc() -> Error {
                 }
 
             } else {
-                strings.write_string(&ea, "[")
+                write_string(&ea, "[")
                 switch r_m {
                     case 0b000:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.BX])
-                        strings.write_string(&ea, " + ")
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.SI])
+                        write_string(&ea, reg_str_w1[RegisterW1.BX])
+                        write_string(&ea, " + ")
+                        write_string(&ea, reg_str_w1[RegisterW1.SI])
                     case 0b001:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.BX])
-                        strings.write_string(&ea, " + ")
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.DI])
+                        write_string(&ea, reg_str_w1[RegisterW1.BX])
+                        write_string(&ea, " + ")
+                        write_string(&ea, reg_str_w1[RegisterW1.DI])
                     case 0b010:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.BP])
-                        strings.write_string(&ea, " + ")
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.SI])
+                        write_string(&ea, reg_str_w1[RegisterW1.BP])
+                        write_string(&ea, " + ")
+                        write_string(&ea, reg_str_w1[RegisterW1.SI])
                     case 0b011:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.BP])
-                        strings.write_string(&ea, " + ")
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.DI])
+                        write_string(&ea, reg_str_w1[RegisterW1.BP])
+                        write_string(&ea, " + ")
+                        write_string(&ea, reg_str_w1[RegisterW1.DI])
                     case 0b100:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.SI])
+                        write_string(&ea, reg_str_w1[RegisterW1.SI])
                     case 0b101:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.DI])
+                        write_string(&ea, reg_str_w1[RegisterW1.DI])
                     case 0b110:
                         // TODO:eandle 110?
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.BP])
+                        write_string(&ea, reg_str_w1[RegisterW1.BP])
                     case 0b111:
-                        strings.write_string(&ea, reg_str_w1[RegisterW1.BX])
+                        write_string(&ea, reg_str_w1[RegisterW1.BX])
 
                 }
                     
@@ -214,8 +192,8 @@ sim :: proc() -> Error {
                     case .Memory8BitDisplacement:
                         displacement := bytes[i + 2]
                         if displacement != 0 {
-                            strings.write_string(&ea, " + ")
-                            strings.write_string(&ea, fmt.tprint(displacement))
+                            write_string(&ea, " + ")
+                            write_string(&ea, fmt.tprint(displacement))
                         }
                         i += 1
                     case .Memory16BitDisplacement:
@@ -223,8 +201,8 @@ sim :: proc() -> Error {
                         fourth := bytes[i + 3]
                         displacement := u16(fourth) << 8 + u16(third)
                         if displacement != 0 {
-                            strings.write_string(&ea, " + ")
-                            strings.write_string(&ea, fmt.tprint(displacement))
+                            write_string(&ea, " + ")
+                            write_string(&ea, fmt.tprint(displacement))
                         }
                         i += 2 
                     case .MemoryNoDisplacement:
@@ -233,8 +211,8 @@ sim :: proc() -> Error {
                             fourth := bytes[i + 3]
                             displacement := u16(fourth) << 8 + u16(third)
                             if displacement != 0 {
-                                strings.write_string(&ea, " + ")
-                                strings.write_string(&ea, fmt.tprint(displacement))
+                                write_string(&ea, " + ")
+                                write_string(&ea, fmt.tprint(displacement))
                             }
                             i += 2 
                         }
@@ -242,21 +220,19 @@ sim :: proc() -> Error {
                 }
 
 
-                strings.write_string(&ea, "]")
+                write_string(&ea, "]")
                 src_operand = w == 0 ? reg_str_w0[RegisterW0(reg)] :
                               reg_str_w1[RegisterW1(reg)]
 
 
-                dst_operand = fmt.tprint(strings.to_string(ea))
+                dst_operand = fmt.tprint(to_string(ea))
                 if d == 0 {
                         src_operand, dst_operand = dst_operand, src_operand 
                 }
             }
         case:
             // If no cases match, this might be a 8-bit imm to reg move.
-
             if u8(opcode) & 0b101100 == 0b101100 {
-
                 w := u8(opcode) & 0b000010 >> 1
                 if w == 0 {
                     reg := RegisterW0(u8(first) & 0b00000111)
@@ -274,24 +250,42 @@ sim :: proc() -> Error {
             } else {
 
                 fmt.printf("Unknown opcode %b\n", u8(opcode))
-                return .UnsupportedOpcode
+                return "", .UnsupportedOpcode
             }
     }
 
     
 
-    strings.write_string(&b, fmt.tprint(src_operand))
-    strings.write_string(&b, ", ")
-    strings.write_string(&b, fmt.tprint(dst_operand))
-    strings.write_string(&b, "\n")
-    strings.builder_reset(&ea)
+    log.debugf("op: %s, %s %s", op, fmt.tprint(src_operand), fmt.tprint(dst_operand))
+    write_string(&b, op)
+    write_string(&b, " ")
+    write_string(&b, fmt.tprint(src_operand))
+    write_string(&b, ", ")
+    write_string(&b, fmt.tprint(dst_operand))
+    write_string(&b, "\n")
+    builder_reset(&ea)
   }
 
-  fmt.println(strings.to_string(b))
-  return .None
+  log.debugf("Disassembly done!")
+  return to_string(b),  .None
 }
 
 main :: proc() {
-    res := sim()
-}
+    dir, _ := os.open("./listings")
+    out_dir := filepath.join([]string{ os.get_current_directory(), "listings", "out" })
+    os.make_directory(out_dir)
+    info, _ := os.read_dir(dir, -1)
+    context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
 
+    for file in info {
+        if !strings.has_suffix(file.name, ".asm") && !file.is_dir {
+            code, _ := os.read_entire_file(file.fullpath)
+            log.debugf("Disassembling %s.", file.name)
+            log.debugf("Read %d bytes.", len(code))
+            out, _ := sim(code)
+            os.write_entire_file(strings.join([]string{filepath.join([]string{out_dir, file.name}), ".asm"}, ""), transmute([]byte)out)
+            delete(out)
+        }
+
+    }
+}
