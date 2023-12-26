@@ -280,12 +280,13 @@ main :: proc() {
     for file in info {
         if !strings.has_suffix(file.name, ".asm") && !file.is_dir {
             code, _ := os.read_entire_file(file.fullpath)
-            log.debugf("Disassembling %s.", file.name)
+            log.infof("Disassembling %s.", file.name)
             log.debugf("Read %d bytes.", len(code))
             out, _ := sim(code)
-            os.write_entire_file(strings.join([]string{filepath.join([]string{out_dir, file.name}), ".asm"}, ""), transmute([]byte)out)
+            out_file := strings.join([]string{filepath.join([]string{out_dir, file.name}), ".asm"}, "")
+            os.write_entire_file(out_file, transmute([]byte)out)
+            log.infof("Wrote %d bytes to %s", len(out), out_file)
             delete(out)
         }
-
     }
 }
