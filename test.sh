@@ -17,9 +17,7 @@ num_failed=0
 
 printf "Running tests...\n"
 
-# Loop through the found files and run your command
 for bin in $expected_bins; do
-    # Replace the following command with the one you want to run on each file
     listing_name=$(echo ${bin} | rev | cut -d '/' -f 1 | rev)
     actual_bin="./listings/out/${listing_name}"
     echo "- ${listing_name}"
