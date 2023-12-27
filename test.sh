@@ -1,6 +1,6 @@
 #!/bin/sh
 
-../Odin/odin run main.odin -file
+odin run main.odin -file
 
 for file in ./listings/out/*.asm
 do
