@@ -269,20 +269,21 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 }
 
 main :: proc() {
-	dir, _ := os.open("./listings")
-	out_dir := filepath.join([]string{os.get_current_directory(), "listings", "out"})
-	os.make_directory(out_dir)
+	dir, _ := os.open("./bin/expected")
+	actual_dir := filepath.join([]string{os.get_current_directory(), "asm", "actual"})
+	os.make_directory(actual_dir)
 	info, _ := os.read_dir(dir, -1)
 	context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
 
 	for file in info {
+	    log.infof("Dir %s.", file)
 		if !strings.has_suffix(file.name, ".asm") && !file.is_dir {
 			code, _ := os.read_entire_file(file.fullpath)
 			log.infof("Disassembling %s.", file.name)
 			log.debugf("Read %d bytes.", len(code))
 			out, _ := sim(code)
 			out_file := strings.join(
-				[]string{filepath.join([]string{out_dir, file.name}), ".asm"},
+				[]string{filepath.join([]string{actual_dir, file.name}), ".asm"},
 				"",
 			)
 			os.write_entire_file(out_file, transmute([]byte)out)

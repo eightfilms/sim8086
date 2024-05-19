@@ -1,37 +1,56 @@
 #!/bin/sh
 
-odin run main.odin -file
+OUT_DIR=./bin/actual/
+EXPECTED_DIR=./bin/expected/
+BINS=()
 
-for file in ./listings/out/*.asm
+
+# 1) Disassemble the expected binaries with our simulator.
+# These binaries are copied from cmuratori's repository.
+../Odin/odin run main.odin -file
+
+# 2) Re-compile all disassembled asm source files. 
+for file in ./asm/actual/*.asm
 do
-    BIN_OUT=$(echo ${file} | cut -d . -f 2)
-    echo "Compiling: nasm ${file} -o .${BIN_OUT}"
-    rm -f ${BIN_OUT}
-    nasm ${file} -o .${BIN_OUT}
+    BIN_OUT_NAME=$(echo ${file} | cut -d '/' -f 4 | cut -d . -f 1)
+    BIN_OUT_PATH=${OUT_DIR}${BIN_OUT_NAME}
+    echo "Compiling: nasm ${file} -o ${BIN_OUT_PATH}"
+    rm -f ${BIN_OUT_PATH}
+    nasm ${file} -o ${BIN_OUT_PATH}
+    BINS+=(${BIN_OUT_NAME})
+    echo ${BINS}
 done
-
-expected_bins=$(find ./listings -maxdepth 1 -type f ! -name "*.asm")
 
 num_tested=0
 num_failed=0
 
 printf "Running tests...\n"
 
-for bin in $expected_bins; do
-    listing_name=$(echo ${bin} | rev | cut -d '/' -f 1 | rev)
-    actual_bin="./listings/out/${listing_name}"
-    echo "- ${listing_name}"
-    res=$(diff ${actual_bin} ${bin})
+passed=()
+# 3) Compare the actual binaries with the expected binaries.
+for bin in ${BINS[@]}; do
+    actual=${OUT_DIR}${bin}
+    expected=${EXPECTED_DIR}${bin}
+    res=$(diff ${actual} ${expected})
 
     
     if [ ! -z "${res}" ]; then
-        printf "  Failed; binaries mismatch\n"
+        echo "- ${bin}\n  Failed; binaries mismatch"
         num_failed=$(expr $num_failed + 1)
+    else
+        passed+=(${bin})
+
     fi
 
     num_tested=$(expr $num_tested + 1)
 done
 
 num_passed=$(expr $num_tested - $num_failed)
-printf "${num_passed} out of ${num_tested} listings passed."
+printf "${num_passed} out of ${num_tested} listings passed.\n"
+
+for bin in ${passed[@]}
+do
+    printf "${bin}\n"
+done
+
 
