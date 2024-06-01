@@ -270,25 +270,57 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 
 main :: proc() {
 	dir, _ := os.open("./bin/expected")
+
 	actual_dir := filepath.join([]string{os.get_current_directory(), "asm", "actual"})
 	os.make_directory(actual_dir)
-	info, _ := os.read_dir(dir, -1)
 	context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
 
-	for file in info {
-	    log.infof("Dir %s.", file)
-		if !strings.has_suffix(file.name, ".asm") && !file.is_dir {
-			code, _ := os.read_entire_file(file.fullpath)
-			log.infof("Disassembling %s.", file.name)
-			log.debugf("Read %d bytes.", len(code))
-			out, _ := sim(code)
-			out_file := strings.join(
-				[]string{filepath.join([]string{actual_dir, file.name}), ".asm"},
-				"",
-			)
-			os.write_entire_file(out_file, transmute([]byte)out)
-			log.infof("Wrote %d bytes to %s", len(out), out_file)
-			delete(out)
+
+	info, _ := os.read_dir(dir, -1)
+	if len(os.args) == 1 {
+		for file in info {
+			if !strings.has_suffix(file.name, ".asm") && !file.is_dir {
+				code, _ := os.read_entire_file(file.fullpath)
+				log.infof("Disassembling %s", file.name)
+				log.debugf("Read %d bytes.", len(code))
+				out, _ := sim(code)
+				out_file := strings.join(
+					[]string{filepath.join([]string{actual_dir, file.name}), ".asm"},
+					"",
+				)
+				os.write_entire_file(out_file, transmute([]byte)out)
+				log.infof("Wrote %d bytes to %s", len(out), out_file)
+				delete(out)
+			}
 		}
+
+	} else if len(os.args) == 2 {
+		found := false
+
+		listing_no := strings.concatenate({"listing_00", os.args[1]})
+		for file in info {
+			if strings.has_prefix(file.name, listing_no) {
+				code, _ := os.read_entire_file(file.fullpath)
+				log.infof("Disassembling %s", file)
+				log.debugf("Read %d bytes.", len(code))
+				out, _ := sim(code)
+				out_file := strings.join(
+					[]string{filepath.join([]string{actual_dir, file.name}), ".asm"},
+					"",
+				)
+				os.write_entire_file(out_file, transmute([]byte)out)
+				log.infof("Wrote %d bytes to %s", len(out), out_file)
+				delete(out)
+				found = true
+
+			}
+		}
+
+		if !found {
+			log.infof("Cannot find listing %s", listing_no)
+		}
+
+	} else {
+		fmt.println("Currently does not support more than 1 file")
 	}
 }

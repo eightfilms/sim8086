@@ -4,7 +4,9 @@ OUT_DIR=./bin/actual/
 EXPECTED_DIR=./bin/expected/
 BINS=()
 
+listing_num=$1
 
+test_all () {
 # 1) Disassemble the expected binaries with our simulator.
 # These binaries are copied from cmuratori's repository.
 ../Odin/odin run main.odin -file
@@ -52,5 +54,35 @@ for bin in ${passed[@]}
 do
     printf "${bin}\n"
 done
+}
 
 
+test_one() {
+    listing_asm=$(find asm/actual -name "*$listing_num*.asm")
+
+    if [ "$listing_asm" == "" ]; then
+        echo "Could not find listing '$listing_num'. Is it a valid listing number?"
+        exit 1
+    fi
+
+    BIN_OUT_NAME=$(echo ${listing_asm} | cut -d '/' -f 3 | cut -d . -f 1)
+    BIN_OUT_PATH=${OUT_DIR}${BIN_OUT_NAME}
+    expected=${EXPECTED_DIR}${BIN_OUT_NAME}
+    echo "Compiling: nasm ${listing_asm} -o ${BIN_OUT_PATH}"
+    rm -f ${BIN_OUT_PATH}
+    nasm ${listing_asm} -o ${BIN_OUT_PATH}
+
+    res=$(diff ${expected} ${BIN_OUT_PATH})
+    if [ ! -z "${res}" ]; then
+        echo "- listing ${listing_num}:\n  Failed; binaries mismatch"
+    fi
+
+
+}
+
+if [ "$listing_num" == "" ]; then
+    test_all
+else
+    test_one
+fi
+exit 0

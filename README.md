@@ -13,6 +13,14 @@ A work-in-progress following the [Performance-Aware Programming Series](https://
 Testing is done by disassembling compiled Assembly listings, re-assembling the result and doing a diff on
 the expected and actual output binaries.
 
+To test all listings:
+
 ```sh
 $ ./test.sh
+```
+
+To test a specific listing, eg. listing 38:
+
+```sh
+$ ./test.sh 37
 ```
