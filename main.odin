@@ -19,7 +19,12 @@ import "core:testing"
 Opcode :: enum {
 	/// Move byte or word.
 	RegOrMemToFromReg = 0b100010,
-	ImmToRegOrMem     = 0b1011,
+	ImmToRegOrMem     = 0b110001,
+	/// Accumulator to memory (and vice versa) opcodes are both 101000,
+	/// but the next bit determines direction.
+	/// 1010000w == memory to acc
+	/// 1010001w == acc to memory
+	Accumulator       = 0b101000,
 }
 
 // Selects register or memory mode with displacement length.
@@ -96,12 +101,13 @@ Error :: enum {
 
 op_str :: proc(opcode: Opcode) -> (string, Error) {
 	op := opcode
+	log.debugf("raw op=%s (%b)", opcode, u8(opcode))
 	if u8(op) & 0b101100 == 0b101100 {
 		op = .ImmToRegOrMem
 	}
 
 	switch op {
-	case .ImmToRegOrMem, .RegOrMemToFromReg:
+	case .ImmToRegOrMem, .RegOrMemToFromReg, .Accumulator:
 		return "mov", .None
 	}
 
@@ -124,7 +130,8 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 		first := bytes[i]
 		second := bytes[i + 1]
 
-		opcode := Opcode(first >> 2)
+		fmt.printf("first byte= {:b} {:b}\n", first, first >> 2)
+		fmt.printf("second byte = {:b}\n", second)
 		// Direction: To Register: From Register
 		d := first & DIRECTION_MASK >> 1
 		// Word/Byte Operation
@@ -133,14 +140,77 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 		mode := Mode(second >> MOD_OFFSET)
 		regs := second & 0b111111
 
+		opcode := Opcode(first >> 2)
 		op := op_str(opcode) or_return
+
 		log.debugf("[%i] d=%b, op=%s (%b)", i / 2, d, op, u8(opcode))
 		reg := second & REG_MASK >> 3
+		fmt.printf("reg = {} {:b}", reg, reg)
 		src_operand := fmt.tprint(reg)
 		dst_operand := fmt.tprint(reg)
 		switch opcode {
 		case .ImmToRegOrMem:
-			return "", .None
+			if d == 1 {
+				fmt.println("ImmToRegOrMem")
+				fmt.printf("mode = {} reg = {} \n", mode, reg)
+				displacement: i16 = 0
+				switch mode {
+				case .Memory8BitDisplacement:
+					displacement = i16(bytes[i + 3]) << 8 + i16(bytes[i + 2])
+					data := i8(bytes[i + 4])
+					i += 3
+
+					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
+				case .Memory16BitDisplacement:
+					displacement = i16(bytes[i + 3]) << 8 + i16(bytes[i + 2])
+					data := i16(bytes[i + 5]) << 8 + i16(bytes[i + 4])
+					i += 4
+					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
+				case .MemoryNoDisplacement:
+					data := i8(bytes[i + 2])
+					i += 1
+					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
+				case .Register:
+				}
+
+				r_m := second & R_M_MASK
+				write_string(&ea, "[")
+				switch r_m {
+				case 0b000:
+					write_string(&ea, reg_str_w1[RegisterW1.BX])
+					write_string(&ea, " + ")
+					write_string(&ea, reg_str_w1[RegisterW1.SI])
+				case 0b001:
+					write_string(&ea, reg_str_w1[RegisterW1.BX])
+					write_string(&ea, " + ")
+					write_string(&ea, reg_str_w1[RegisterW1.DI])
+				case 0b010:
+					write_string(&ea, reg_str_w1[RegisterW1.BP])
+					write_string(&ea, " + ")
+					write_string(&ea, reg_str_w1[RegisterW1.SI])
+				case 0b011:
+					write_string(&ea, reg_str_w1[RegisterW1.BP])
+					write_string(&ea, " + ")
+					write_string(&ea, reg_str_w1[RegisterW1.DI])
+				case 0b100:
+					write_string(&ea, reg_str_w1[RegisterW1.SI])
+				case 0b101:
+					write_string(&ea, reg_str_w1[RegisterW1.DI])
+					if displacement > 0 {
+						write_string(&ea, " + ")
+						write_string(&ea, fmt.tprint(displacement))
+					}
+				case 0b110:
+					write_string(&ea, reg_str_w1[RegisterW1.BP])
+				case 0b111:
+					write_string(&ea, reg_str_w1[RegisterW1.BX])
+
+				}
+
+				write_string(&ea, "]")
+				src_operand = fmt.tprint(to_string(ea))
+
+			}
 		case .RegOrMemToFromReg:
 			r_m := second & R_M_MASK
 
@@ -181,8 +251,6 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 				case 0b101:
 					write_string(&ea, reg_str_w1[RegisterW1.DI])
 				case 0b110:
-					// TODO:eandle 110?
-					write_string(&ea, reg_str_w1[RegisterW1.BP])
 				case 0b111:
 					write_string(&ea, reg_str_w1[RegisterW1.BX])
 
@@ -190,20 +258,29 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 
 				switch mode {
 				case .Memory8BitDisplacement:
-					displacement := bytes[i + 2]
-					if displacement != 0 {
+					displacement := i8(bytes[i + 2])
+					if displacement > 0 {
 						write_string(&ea, " + ")
 						write_string(&ea, fmt.tprint(displacement))
-					}
+					} else if displacement < 0 {
+						write_string(&ea, " - ")
+						write_string(&ea, fmt.tprint(-displacement))
+					} else {}
+
+
 					i += 1
 				case .Memory16BitDisplacement:
 					third := bytes[i + 2]
 					fourth := bytes[i + 3]
-					displacement := u16(fourth) << 8 + u16(third)
-					if displacement != 0 {
+					displacement := i16(fourth) << 8 + i16(third)
+					if displacement > 0 {
 						write_string(&ea, " + ")
 						write_string(&ea, fmt.tprint(displacement))
-					}
+					} else if displacement < 0 {
+						write_string(&ea, " - ")
+						write_string(&ea, fmt.tprint(-displacement))
+					} else {}
+
 					i += 2
 				case .MemoryNoDisplacement:
 					if r_m == 0b110 {
@@ -211,7 +288,6 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 						fourth := bytes[i + 3]
 						displacement := u16(fourth) << 8 + u16(third)
 						if displacement != 0 {
-							write_string(&ea, " + ")
 							write_string(&ea, fmt.tprint(displacement))
 						}
 						i += 2
@@ -229,6 +305,25 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 					src_operand, dst_operand = dst_operand, src_operand
 				}
 			}
+		case .Accumulator:
+			b := Builder{}
+			defer builder_destroy(&b)
+			third := bytes[i + 2]
+
+			mem_to_acc := d == 0
+			addr := i16(third) << 8 + i16(second)
+			write_string(&b, "[")
+			write_string(&b, fmt.tprint(addr))
+			write_string(&b, "]")
+			if mem_to_acc {
+				src_operand = "ax"
+				dst_operand = fmt.tprint(to_string(b))
+			} else {
+				src_operand = fmt.tprint(to_string(b))
+				dst_operand = "ax"
+			}
+
+			i += 1
 		case:
 			// If no cases match, this might be a 8-bit imm to reg move.
 			if u8(opcode) & 0b101100 == 0b101100 {
@@ -254,7 +349,7 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 		}
 
 
-		log.debugf("op: %s, %s %s", op, fmt.tprint(src_operand), fmt.tprint(dst_operand))
+		log.debugf("op: %s %s %s", op, fmt.tprint(src_operand), fmt.tprint(dst_operand))
 		write_string(&b, op)
 		write_string(&b, " ")
 		write_string(&b, fmt.tprint(src_operand))
