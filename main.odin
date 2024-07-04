@@ -159,7 +159,6 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 					displacement = i16(bytes[i + 3]) << 8 + i16(bytes[i + 2])
 					data := i8(bytes[i + 4])
 					i += 3
-
 					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
 				case .Memory16BitDisplacement:
 					displacement = i16(bytes[i + 3]) << 8 + i16(bytes[i + 2])
@@ -251,6 +250,9 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 				case 0b101:
 					write_string(&ea, reg_str_w1[RegisterW1.DI])
 				case 0b110:
+					if mode != .MemoryNoDisplacement {
+						write_string(&ea, reg_str_w1[RegisterW1.BP])
+					}
 				case 0b111:
 					write_string(&ea, reg_str_w1[RegisterW1.BX])
 

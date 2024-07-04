@@ -48,16 +48,18 @@ for bin in ${BINS[@]}; do
 done
 
 num_passed=$(expr $num_tested - $num_failed)
-printf "${num_passed} out of ${num_tested} listings passed.\n"
+printf "\n${num_passed} out of ${num_tested} listings passed.\n"
 
 for bin in ${passed[@]}
 do
-    printf "${bin}\n"
+    printf "  - ${bin}\n"
 done
 }
 
 
 test_one() {
+../Odin/odin run main.odin -file -- $listing_num
+
     listing_asm=$(find asm/actual -name "*$listing_num*.asm")
 
     if [ "$listing_asm" == "" ]; then
