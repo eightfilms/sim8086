@@ -82,14 +82,6 @@ RegisterStringW1 :: [RegisterW1]string {
 	.DI = "di",
 }
 
-/* Masks */
-DIRECTION_MASK: u8 = 0b0000_0010
-WORD_BYTE_OP_MASK: u8 = 0b0000_0001
-REG_MASK: u8 = 0b0011_1000
-R_M_MASK: u8 = 0b0000_0111
-
-/* Offsets */
-MOD_OFFSET: u8 = 6
 
 DEBUG :: #config(DEBUG, false)
 
@@ -116,6 +108,38 @@ op_str :: proc(opcode: Opcode) -> (string, Error) {
 	return err_msg, .UnsupportedOpcode
 }
 
+/// The first byte of an 8086 instruction comes in this format:
+/// 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+///         opcode        | d | w 
+decode_first_byte :: proc(first: byte) -> (opcode: Opcode, d, w: u8) {
+	DIRECTION_MASK: u8 = 0b0000_0010
+	IS_WORD_MASK: u8 = 0b0000_0001
+	opcode = Opcode(first >> 2)
+	// Direction: To Register: From Register
+	d = first & DIRECTION_MASK >> 1
+	// Word/Byte Operation
+	w = first & IS_WORD_MASK
+
+	return opcode, d, w
+}
+
+/// The second byte of an 8086 instruction comes in this format:
+/// 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7
+///  mode |    reg    |    r_m 
+decode_second_byte :: proc(second: byte) -> (mod: Mode, reg, r_m: u8) {
+	REG_MASK: u8 = 0b0011_1000
+	R_M_MASK: u8 = 0b0000_0111
+
+	/* Offsets */
+	MOD_OFFSET: u8 = 6
+
+	mod = Mode(second >> MOD_OFFSET)
+	reg = second & REG_MASK >> 3
+	r_m = second & R_M_MASK
+
+	return mod, reg, r_m
+}
+
 sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 	using strings
 	reg_str_w0 := RegisterStringW0
@@ -127,52 +151,38 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 	defer builder_destroy(&ea)
 
 	for i := 0; i < len(bytes); i += 2 {
-		first := bytes[i]
-		second := bytes[i + 1]
+		first, second := bytes[i], bytes[i + 1]
+		opcode, d, w := decode_first_byte(first)
+		mode, reg, r_m := decode_second_byte(second)
 
-		fmt.printf("first byte= {:b} {:b}\n", first, first >> 2)
-		fmt.printf("second byte = {:b}\n", second)
-		// Direction: To Register: From Register
-		d := first & DIRECTION_MASK >> 1
-		// Word/Byte Operation
-		w := first & WORD_BYTE_OP_MASK
-
-		mode := Mode(second >> MOD_OFFSET)
-		regs := second & 0b111111
-
-		opcode := Opcode(first >> 2)
 		op := op_str(opcode) or_return
 
 		log.debugf("[%i] d=%b, op=%s (%b)", i / 2, d, op, u8(opcode))
-		reg := second & REG_MASK >> 3
 		fmt.printf("reg = {} {:b}", reg, reg)
-		src_operand := fmt.tprint(reg)
-		dst_operand := fmt.tprint(reg)
+		src_operand, dst_operand := fmt.tprint(reg), fmt.tprint(reg)
+
 		switch opcode {
 		case .ImmToRegOrMem:
 			if d == 1 {
-				fmt.println("ImmToRegOrMem")
-				fmt.printf("mode = {} reg = {} \n", mode, reg)
 				displacement: i16 = 0
 				switch mode {
 				case .Memory8BitDisplacement:
 					displacement = i16(bytes[i + 3]) << 8 + i16(bytes[i + 2])
 					data := i8(bytes[i + 4])
-					i += 3
+					defer i += 3
 					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
 				case .Memory16BitDisplacement:
 					displacement = i16(bytes[i + 3]) << 8 + i16(bytes[i + 2])
 					data := i16(bytes[i + 5]) << 8 + i16(bytes[i + 4])
-					i += 4
+					defer i += 4
 					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
 				case .MemoryNoDisplacement:
 					data := i8(bytes[i + 2])
-					i += 1
+					defer i += 1
 					dst_operand = w == 0 ? fmt.tprint("byte", data) : fmt.tprint("word", data)
 				case .Register:
 				}
 
-				r_m := second & R_M_MASK
 				write_string(&ea, "[")
 				switch r_m {
 				case 0b000:
@@ -211,8 +221,6 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 
 			}
 		case .RegOrMemToFromReg:
-			r_m := second & R_M_MASK
-
 			if mode == .Register {
 				if w == 0 {
 					reg_1 := RegisterW0(reg)
@@ -261,6 +269,8 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 				switch mode {
 				case .Memory8BitDisplacement:
 					displacement := i8(bytes[i + 2])
+					defer i += 1
+
 					if displacement > 0 {
 						write_string(&ea, " + ")
 						write_string(&ea, fmt.tprint(displacement))
@@ -270,10 +280,11 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 					} else {}
 
 
-					i += 1
 				case .Memory16BitDisplacement:
 					third := bytes[i + 2]
 					fourth := bytes[i + 3]
+					defer i += 2
+
 					displacement := i16(fourth) << 8 + i16(third)
 					if displacement > 0 {
 						write_string(&ea, " + ")
@@ -283,23 +294,24 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 						write_string(&ea, fmt.tprint(-displacement))
 					} else {}
 
-					i += 2
 				case .MemoryNoDisplacement:
 					if r_m == 0b110 {
 						third := bytes[i + 2]
 						fourth := bytes[i + 3]
+						defer i += 2
+
 						displacement := u16(fourth) << 8 + u16(third)
 						if displacement != 0 {
 							write_string(&ea, fmt.tprint(displacement))
 						}
-						i += 2
 					}
 				case .Register:
 				}
 
 
 				write_string(&ea, "]")
-				src_operand = w == 0 ? reg_str_w0[RegisterW0(reg)] : reg_str_w1[RegisterW1(reg)]
+				src_operand =
+					w == 0 ? reg_str_w0[RegisterW0(reg)] : reg_str_w1[RegisterW1(reg)]
 
 
 				dst_operand = fmt.tprint(to_string(ea))
@@ -351,7 +363,12 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 		}
 
 
-		log.debugf("op: %s %s %s", op, fmt.tprint(src_operand), fmt.tprint(dst_operand))
+		log.debugf(
+			"op: %s %s %s",
+			op,
+			fmt.tprint(src_operand),
+			fmt.tprint(dst_operand),
+		)
 		write_string(&b, op)
 		write_string(&b, " ")
 		write_string(&b, fmt.tprint(src_operand))
@@ -368,7 +385,9 @@ sim :: proc(bytes: []byte) -> (out: string, err: Error) {
 main :: proc() {
 	dir, _ := os.open("./bin/expected")
 
-	actual_dir := filepath.join([]string{os.get_current_directory(), "asm", "actual"})
+	actual_dir := filepath.join(
+		[]string{os.get_current_directory(), "asm", "actual"},
+	)
 	os.make_directory(actual_dir)
 	context.logger = log.create_console_logger(opt = {.Level, .Terminal_Color})
 
